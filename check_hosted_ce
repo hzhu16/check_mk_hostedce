@@ -16,22 +16,39 @@ def main():
     states = [STATE_OK]
     messages = []
 
-    
+
     coll = htcondor.Collector(args.hostname)
     schedd_ad = coll.locate(htcondor.DaemonTypes.Schedd)
     schedd = htcondor.Schedd(schedd_ad)
     submitted_jobs = False
     stats = {
         'held': 0,
-        'idle_long': 0
+        'idle': 0,
+        'idle_long': 0,
+        'running': 0,
     }
 
+    job_attrs = [
+        'JobStatus',
+        'ServerTime',
+        'EnteredCurrentStatus',
+        'GridJobStatus',
+        'GridJobId',
+    ]
+
     # Check for held job
-    for job in schedd.xquery(requirements = 'RoutedJob == TRUE'):
-        if 'JobStatus' in job and job['JobStatus'] == 5:
-            stats['held'] += 1
-            continue
-        
+    for job in schedd.xquery(requirements='RoutedJob == TRUE', projection=job_attrs):
+        if 'JobStatus' in job:
+            if job['JobStatus'] == 1:
+                stats['idle'] += 1
+                continue
+            if job['JobStatus'] == 2:
+                stats['running'] += 1
+                continue
+            if job['JobStatus'] == 5:
+                stats['held'] += 1
+                continue
+
         # Has the routed job been idle for longer than 10 minutes, ie not submitted
         if job['JobStatus'] == 1 and (job['ServerTime'] - job['EnteredCurrentStatus']) > 60*10 and 'GridJobStatus' not in job:
             stats['idle_long'] += 1
@@ -47,18 +64,26 @@ def main():
                 pass
 
     if stats['held'] > 0:
-        print("Held Job(s)")
-        sys.exit(STATE_CRITICAL)
+        messages.append("{} Held Job(s)".format(stats['held']))
+        states.append(STATE_CRITICAL)
     if stats['idle_long'] > 0:
-        print("Long idle Job")
-        sys.exit(STATE_CRITICAL)
+        messages.append("{} Long idle Job".format(stats['idle_long']))
+        states.append(STATE_CRITICAL)
 
-    print('OK')
-    sys.exit(STATE_OK)
+    state = max(states)
+    message = ', '.join(messages)
+
+    perf_data = ' |running=%(running)d idle=%(idle)d held=%(held)d' % stats
+
+    if not message:
+        message = 'OK'
+
+    print(message + perf_data)
+    sys.exit(state)
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument('hostname')
+    parser.add_argument('collector')
     return parser.parse_args()
 
 if __name__ == "__main__":
