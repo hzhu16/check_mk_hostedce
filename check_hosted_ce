@@ -17,7 +17,7 @@ def main():
     messages = []
 
 
-    coll = htcondor.Collector(args.hostname)
+    coll = htcondor.Collector(args.collector)
     schedd_ad = coll.locate(htcondor.DaemonTypes.Schedd)
     schedd = htcondor.Schedd(schedd_ad)
     submitted_jobs = False
