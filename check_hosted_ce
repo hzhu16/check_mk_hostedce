@@ -15,18 +15,7 @@ def main():
     args = parse_args()
     states = [STATE_OK]
     messages = []
-
-
-    coll = htcondor.Collector(args.collector)
-    schedd_ad = coll.locate(htcondor.DaemonTypes.Schedd)
-    schedd = htcondor.Schedd(schedd_ad)
-    submitted_jobs = False
-    stats = {
-        'held': 0,
-        'idle': 0,
-        'idle_long': 0,
-        'running': 0,
-    }
+    jobs = []
 
     job_attrs = [
         'JobStatus',
@@ -36,8 +25,29 @@ def main():
         'GridJobId',
     ]
 
+    try:
+        coll = htcondor.Collector(args.collector)
+        schedd_ad = coll.locate(htcondor.DaemonTypes.Schedd)
+        schedd = htcondor.Schedd(schedd_ad)
+        jobs = schedd.xquery(requirements='RoutedJob == TRUE', projection=job_attrs)
+    except IOError as e:
+        # Connection failed
+        states.append(STATE_CRITICAL)
+        messages.append(str(e))
+    except Exception as e:
+        # Other error
+        states.append(STATE_UNKNOWN)
+        messages.append(str(e))
+
+    stats = {
+        'held': 0,
+        'idle': 0,
+        'idle_long': 0,
+        'running': 0,
+    }
+
     # Check for held job
-    for job in schedd.xquery(requirements='RoutedJob == TRUE', projection=job_attrs):
+    for job in jobs:
         if 'JobStatus' in job:
             if job['JobStatus'] == 1:
                 stats['idle'] += 1
@@ -63,8 +73,10 @@ def main():
             except:
                 pass
 
+    if jobs:
+        messages.append("{} running, {} idle, {} held jobs".format(stats['running'], stats['idle'], stats['held']))
+
     if stats['held'] > 0:
-        messages.append("{} Held Job(s)".format(stats['held']))
         states.append(STATE_CRITICAL)
     if stats['idle_long'] > 0:
         messages.append("{} Long idle Job".format(stats['idle_long']))
