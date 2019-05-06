@@ -45,7 +45,7 @@ def main():
             if job['JobStatus'] == 2:
                 stats['running'] += 1
                 continue
-            if job['JobStatus'] == 5:
+            if job['JobStatus'] == 5 and job['HoldReasonCode'] != 16:
                 stats['held'] += 1
                 continue
 
