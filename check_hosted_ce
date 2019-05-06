@@ -73,8 +73,10 @@ def main():
             except:
                 pass
 
+    if jobs:
+        messages.append("{} running, {} idle, {} held jobs".format(stats['running'], stats['idle'], stats['held']))
+
     if stats['held'] > 0:
-        messages.append("{} Held Job(s)".format(stats['held']))
         states.append(STATE_CRITICAL)
     if stats['idle_long'] > 0:
         messages.append("{} Long idle Job".format(stats['idle_long']))
