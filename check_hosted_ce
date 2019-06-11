@@ -34,11 +34,11 @@ def main():
     except IOError as e:
         # Connection failed
         states.append(STATE_CRITICAL)
-        messages.append(str(e))
+        messages.append(str(e) + " " +args.collector + " failed.")
     except Exception as e:
         # Other error
         states.append(STATE_UNKNOWN)
-        messages.append(str(e))
+        messages.append(str(e) + " " + args.collector+ " failed.")
 
     stats = {
         'held': 0,
@@ -78,7 +78,40 @@ def main():
         messages.append("{} running, {} idle, {} held jobs".format(stats['running'], stats['idle'], stats['held']))
 
     if stats['held'] > 0:
-        states.append(STATE_CRITICAL)
+        #get hostname
+        hostname = args.collector.split(":")[0]
+        #get held job threshold
+        try:
+            gfactory = htcondor.Collector("gfactory-2.opensciencegrid.org")
+            query_const = 'MyType=?="glidefactory" && GLIDEIN_Gatekeeper=?="' + hostname + ' ' + args.collector +'"'
+        #print(query_const)
+            entry = gfactory.query(htcondor.AdTypes.Any, query_const, ['GlideinConfigPerEntryMaxHeld'])
+        except:
+            messages.append(" Entry not found in gfactory")
+            #print (messages)
+            states.append(STATE_WARNING)
+        #print(entry)
+        if len(entry) == 1:
+            maxheld = entry[0]['GlideinConfigPerEntryMaxHeld']
+            #print(maxheld)
+            if maxheld:
+                if isinstance(maxheld, (int,long,float)): #maxheld must be a number
+                    if stats['held'] > maxheld:
+                        messages.append(" held jobs exceed GlideinConfigPerEntryMaxHeld (" + str(maxheld) +")")
+                        #print (messages)
+                        states.append(STATE_CRITICAL)
+                else:
+                    messages.append(" GlideinConfigPerEntryMaxHeld not valid")
+                    #print (messages)
+                    states.append(STATE_WARNING)
+            else:
+                messages.append(" GlideinConfigPerEntryMaxHeld not configured")
+                states.append(STATE_WARNING)
+        elif len(entry) > 1:
+                messages.append(" Multiple entries found in gfactory")
+                #print (messages)
+                states.append(STATE_WARNING)
+
     if stats['idle_long'] > 0:
         messages.append("{} Long idle Job".format(stats['idle_long']))
         states.append(STATE_CRITICAL)
