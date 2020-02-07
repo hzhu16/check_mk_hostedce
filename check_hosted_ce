@@ -34,11 +34,11 @@ def main():
     except IOError as e:
         # Connection failed
         states.append(STATE_CRITICAL)
-        messages.append(str(e) + " " +args.collector + " failed.")
+        messages.append(str(e))
     except Exception as e:
         # Other error
         states.append(STATE_UNKNOWN)
-        messages.append(str(e) + " " + args.collector+ " failed.")
+        messages.append(str(e))
 
     stats = {
         'held': 0,
@@ -52,7 +52,7 @@ def main():
         if 'JobStatus' in job:
             if job['JobStatus'] == 1:
                 stats['idle'] += 1
-                continue
+                #continue
             if job['JobStatus'] == 2:
                 stats['running'] += 1
                 continue
@@ -61,7 +61,8 @@ def main():
                 continue
 
         # Has the routed job been idle for longer than 10 minutes, ie not submitted
-        if job['JobStatus'] == 1 and (job['ServerTime'] - job['EnteredCurrentStatus']) > 60*10 and 'GridJobStatus' not in job:
+        #if job['JobStatus'] == 1 and (job['ServerTime'] - job['EnteredCurrentStatus']) > 60*10 and 'GridJobStatus' not in job:
+        if job['JobStatus'] == 1 and (job['ServerTime'] - job['EnteredCurrentStatus']) > 600:
             stats['idle_long'] += 1
             continue
 
@@ -74,52 +75,75 @@ def main():
             except:
                 pass
 
-    if jobs:
-        messages.append("{} running, {} idle, {} held jobs".format(stats['running'], stats['idle'], stats['held']))
-
-    if stats['held'] > 0:
-        #get hostname
-        hostname = args.collector.split(":")[0]
-        #get held job threshold
-        try:
-            gfactory = htcondor.Collector("gfactory-2.opensciencegrid.org")
-            query_const = 'MyType=?="glidefactory" && GLIDEIN_Gatekeeper=?="' + hostname + ' ' + args.collector +'"'
-        #print(query_const)
-            entry = gfactory.query(htcondor.AdTypes.Any, query_const, ['GlideinConfigPerEntryMaxHeld'])
-        except:
-            messages.append(" Entry not found in gfactory")
-            #print (messages)
-            states.append(STATE_WARNING)
-        #print(entry)
-        if len(entry) == 1:
-            maxheld = entry[0]['GlideinConfigPerEntryMaxHeld']
-            #print(maxheld)
-            if maxheld:
-                if isinstance(maxheld, (int,long,float)): #maxheld must be a number
-                    if stats['held'] > maxheld:
-                        messages.append(" held jobs exceed GlideinConfigPerEntryMaxHeld (" + str(maxheld) +")")
-                        #print (messages)
-                        states.append(STATE_CRITICAL)
-                else:
-                    messages.append(" GlideinConfigPerEntryMaxHeld not valid")
-                    #print (messages)
-                    states.append(STATE_WARNING)
-            else:
-                messages.append(" GlideinConfigPerEntryMaxHeld not configured")
-                states.append(STATE_WARNING)
-        elif len(entry) > 1:
-                messages.append(" Multiple entries found in gfactory")
-                #print (messages)
-                states.append(STATE_WARNING)
-
-    if stats['idle_long'] > 0:
+    #if stats['idle_long'] > 0:
+    if stats['running']==0 and stats['idle_long'] > 0:
         messages.append("{} Long idle Job".format(stats['idle_long']))
         states.append(STATE_CRITICAL)
 
+    if jobs:
+        messages.append("{} running, {} idle, {} held jobs".format(stats['running'], stats['idle'], stats['held']))
+
+    #get glidein entry attributes
+    entry_attr = []
+    req_idle = 0
+    hostname = args.collector.split(":")[0]
+    query_const = 'MyType=?="glidefactory" && GLIDEIN_Gatekeeper=?="' + hostname + ' ' + args.collector +'"'
+    try:
+        factory = htcondor.Collector(args.factory)
+        entry_attr = factory.query(htcondor.AdTypes.Any, query_const, ['Name','GlideinConfigPerEntryMaxHeld','GlideinMonitorTotalRequestedIdle'])
+        #print(entry_attr)
+        if len(entry_attr) > 0:
+            for attr in entry_attr:
+                max_held = attr['GlideinConfigPerEntryMaxHeld']
+                req_idle = attr['GlideinMonitorTotalRequestedIdle']
+                resource_name = attr['Name'].split("@")[0]
+                if max_held:
+                    if not isinstance(max_held, (int,long,float)): #max_held must be a number
+                        messages.append(", GlideinConfigPerEntryMaxHeld not valid in resource " + resource_name)
+                        #print (messages)
+                        states.append(STATE_WARNING)
+                else:
+                    messages.append(", GlideinConfigPerEntryMaxHeld not configured in resource " + resource_name)
+                    states.append(STATE_WARNING)
+                if req_idle > 0:
+                    messages.append(str(req_idle) + " requested idle in resource " + resource_name)
+                    if stats['running'] == 0 :
+                        if stats['held'] > 0:
+                            states.append(STATE_CRITICAL)
+                            messages.append("requests to resource " + resource_name + " held by CE")
+                        else:
+                            if stats['idle'] == 0:
+                                states.append(STATE_CRITICAL)
+                                messages.append("requests to resource " + resource_name + " not entering CE")
+                    if stats['held'] > 0.9 * max_held:
+                        states.append(STATE_WARNING)
+                        messages.append("held jobs to resource " + resource_name + " exceed 90% of GlideinConfigPerEntryMaxHeld ("+ str(max_held) +")")
+                if stats['held'] > max_held:
+                    states.append(STATE_CRITICAL)
+                    messages.append("held jobs to resource " + resource_name + " exceed GlideinConfigPerEntryMaxHeld ("+ str(max_held) +")")
+            #elif len(entry_attr) > 1:
+            #     messages.append(", Multiple entries found in factory")
+                #print (messages)
+            #    states.append(STATE_WARNING)
+
+        else:
+            messages.append(" not found in factory " + args.factory)
+            #print (messages)
+            states.append(STATE_WARNING)
+
+    except IOError as e:
+        # Connection failed
+        states.append(STATE_WARNING)
+        messages.append("Failed to connect to factory " +args.factory + " (error: " + str(e) +")")
+    except Exception as e:
+        # Other error
+        states.append(STATE_WARNING)
+        messages.append("Failed to connect to factory " +args.factory + " (error: " + str(e) +")")
     state = max(states)
     message = ', '.join(messages)
 
     perf_data = ' |running=%(running)d idle=%(idle)d held=%(held)d' % stats
+    perf_data += ' req_idle=' + str(req_idle)
 
     if not message:
         message = 'OK'
@@ -130,6 +154,7 @@ def main():
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('collector')
+    parser.add_argument('factory')
     return parser.parse_args()
 
 if __name__ == "__main__":
