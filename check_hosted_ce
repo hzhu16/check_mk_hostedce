@@ -4,6 +4,7 @@
 import argparse
 import sys
 import htcondor
+import os
 
 # Nagios exit status
 STATE_OK = 0
@@ -47,6 +48,8 @@ def main():
         'running': 0,
     }
 
+    #os.environ['X509_USER_PROXY'] = '/tmp/x509up_u991'
+
     # Check for held job
     for job in jobs:
         if 'JobStatus' in job:
@@ -62,7 +65,9 @@ def main():
 
         # Has the routed job been idle for longer than 10 minutes, ie not submitted
         #if job['JobStatus'] == 1 and (job['ServerTime'] - job['EnteredCurrentStatus']) > 60*10 and 'GridJobStatus' not in job:
-        if job['JobStatus'] == 1 and (job['ServerTime'] - job['EnteredCurrentStatus']) > 600:
+        #if job['JobStatus'] == 1 and (job['ServerTime'] - job['EnteredCurrentStatus']) > 600:
+        # Has the routed job been idle for longer than 24 hours
+        if job['JobStatus'] == 1 and (job['ServerTime'] - job['EnteredCurrentStatus']) > 86400:
             stats['idle_long'] += 1
             continue
 
@@ -106,7 +111,7 @@ def main():
                     messages.append(", GlideinConfigPerEntryMaxHeld not configured in resource " + resource_name)
                     states.append(STATE_WARNING)
                 if req_idle > 0:
-                    messages.append(str(req_idle) + " requested idle in resource " + resource_name)
+                    messages.append(str(req_idle) + " requested idle in resource ")
                     if stats['running'] == 0 :
                         if stats['held'] > 0:
                             states.append(STATE_CRITICAL)
@@ -159,4 +164,4 @@ def parse_args():
 
 if __name__ == "__main__":
     # Run script as main
-    main()
+    main()  
